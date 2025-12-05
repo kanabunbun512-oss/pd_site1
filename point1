@@ -1,0 +1,500 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <title>ポイント交換</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    :root { font-family: system-ui, -apple-system, "Segoe UI", sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background:#f7f7f7; color:#222; }
+    header { background:#111; color:#fff; padding:14px 16px; }
+    /* 下部フローティングUIと重ならない余白 */
+    main { max-width:820px; margin:20px auto; padding:0 16px 120px; }
+
+    .card { background:#fff; border:1px solid #ddd; border-radius:10px; padding:14px; max-width:100%; overflow:hidden; }
+    .row { display:flex; gap:12px; flex-wrap:wrap; }
+    .item { width:100%; }
+
+    button, .btn {
+      cursor:pointer; border:1px solid #222; background:#222; color:#fff;
+      padding:10px 16px; border-radius:8px; text-decoration:none;
+      display:inline-flex; align-items:center; justify-content:center;
+    }
+    button[disabled], .btn[aria-disabled="true"] { opacity:.6; cursor:not-allowed; }
+    .btn-exchange { padding:12px 24px; min-width:180px; }
+    .btn-soldout {
+      background:#9e9e9e; border:1px solid #9e9e9e; color:#fff;
+      padding:12px 24px; min-width:180px;
+      display:inline-flex; align-items:center; justify-content:center;
+      border-radius:8px; /* ← 丸みを追加 */
+    }
+
+    .muted { color:#666; }
+    .right { margin-left:auto; }
+    .toolbar { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .pill { background:#111; color:#fff; border-radius:999px; padding:6px 12px; display:inline-block; }
+    .list { display:grid; gap:12px; }
+    .grid { display:block; } /* 縦並び */
+    .error { background:#ffecec; border:1px solid #f5a3a3; color:#a10000; padding:10px; border-radius:8px; }
+    .ok    { background:#ecfff0; border:1px solid #9be0a9; color:#0b6b1a; padding:10px; border-radius:8px; }
+    .small { font-size:12px; }
+    .mono  { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .separator { height:1px; background:#e7e7e7; margin:12px 0; }
+    details summary { cursor:pointer; }
+
+    /* アイテム行（はみ出し対策） */
+    .item-line { display:flex; gap:12px; align-items:flex-start; }
+    .item-content { flex:1; min-width:0; overflow-wrap:anywhere; }
+    .item-content .title { font-weight:600; font-size:16px; }
+    .item-content .desc  { margin-top:4px; }
+
+    /* モーダル（<dialog>） */
+    dialog::backdrop { background: rgba(0,0,0,.35); }
+    dialog { border:none; border-radius:12px; padding:0; max-width:560px; width:calc(100% - 32px); }
+    .modal { padding:16px; }
+    .modal header { background:#111; color:#fff; padding:12px 16px; border-radius:12px 12px 0 0; }
+    .modal .content { padding:16px; }
+    .modal .actions { display:flex; gap:8px; justify-content:flex-end; padding:12px 16px; border-top:1px solid #eee; flex-wrap:wrap; }
+    .btn-ghost { background:#fff; color:#222; border:1px solid #bbb; }
+    .btn-primary { background:#222; border-color:#222; }
+
+    /* 数量セレクタ */
+    .qtyWrap {
+      display:flex; align-items:center; gap:10px; flex-wrap:wrap;
+      border:1px solid #e5e5e5; border-radius:10px; padding:10px 12px; background:#fafafa;
+    }
+    .qtyBox { display:flex; align-items:center; gap:8px; }
+    .qtyBtn {
+      width:36px; height:36px; border-radius:8px; border:1px solid #ccc; background:#fff; color:#111;
+      display:inline-flex; align-items:center; justify-content:center; font-size:18px; line-height:1;
+    }
+    .qtyBtn:disabled { opacity:.4; }
+    .qtyNum {
+      min-width:2ch; text-align:center; font-weight:700; font-size:16px; padding:4px 10px; background:#fff; border:1px solid #ddd; border-radius:8px;
+    }
+    .infoLine { display:flex; gap:16px; flex-wrap:wrap; align-items:center; }
+
+    /* パーン！エフェクト */
+    #burstLayer { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 9999; }
+    .particle {
+      position: absolute;
+      left: var(--x);
+      top:  var(--y);
+      width: var(--size);
+      height:var(--size);
+      border-radius: 2px;
+      opacity: 0;
+      transform: translate(0,0) scale(.6) rotate(0deg);
+      animation: burstMove 950ms ease-out forwards;
+      box-shadow: 0 0 0.5px rgba(0,0,0,.2);
+    }
+    @keyframes burstMove {
+      0%   { opacity:0; transform: translate(0,0) scale(.4) rotate(0deg); }
+      12%  { opacity:1; }
+      100% { opacity:0; transform: translate(var(--tx), var(--ty)) scale(1) rotate(var(--rot)); }
+    }
+
+    /* フローティングUI（右下：ホーム／左下：残高） */
+    .floating { position: fixed; bottom: 16px; z-index: 9990; display: flex; align-items: center; gap: 8px;
+      backdrop-filter: blur(6px); border-radius: 12px; padding: 10px 12px; box-shadow: 0 4px 20px rgba(0,0,0,.12); max-width: calc(100vw - 24px); }
+    .floating-right { right: 16px; background: rgba(17,17,17,.9); border:1px solid rgba(255,255,255,.08); }
+    .floating-left  { left: 16px;  background: rgba(255,255,255,.92); border:1px solid rgba(0,0,0,.06); color:#111; }
+    .floating .pill-mini { background:#111; color:#fff; border-radius:999px; padding:4px 10px; font-size:12px; }
+    .floating-right .btn { background:#fff; color:#111; border-color:#fff; }
+
+    @media (max-width: 480px) {
+      .btn-exchange { min-width: 150px; }
+    }
+  </style>
+</head>
+<body>
+  <header><strong>ポイント交換</strong></header>
+
+  <main id="exchange">
+    <!-- 残高（テスト付与は開発時のみ） -->
+    <section class="card">
+      <div class="toolbar">
+        <div>現在のポイント：<span id="balance" class="pill">0 pt</span></div>
+        <div class="right"></div>
+        <label class="muted small">テスト付与</label>
+        <input id="grantInput" type="number" min="1" value="100" style="width:90px;padding:6px;border-radius:8px;border:1px solid #ccc;">
+        <button id="grantBtn">付与</button>
+        <button id="resetBtn" title="ローカル保存を初期化">初期化</button>
+      </div>
+      <div id="msg" style="margin-top:10px;"></div>
+    </section>
+
+    <!-- カタログ -->
+    <section style="margin-top:16px" class="card">
+      <h3 style="margin:0 0 8px">交換できるアイテム</h3>
+      <div id="catalog" class="grid"></div>
+    </section>
+
+    <!-- 履歴 -->
+    <section style="margin-top:16px" class="card">
+      <div class="toolbar">
+        <h3 style="margin:0">交換履歴</h3>
+        <div class="right"></div>
+        <button id="exportBtn" title="CSVで保存">CSVエクスポート</button>
+        <button id="clearHistoryBtn" title="履歴を消す">履歴クリア</button>
+      </div>
+      <div id="history" class="list" style="margin-top:8px"></div>
+    </section>
+
+    <details style="margin-top:16px">
+      <summary>埋め込み/リンク方法（他ページ→この交換画面へ）</summary>
+      <div class="card" style="margin-top:8px">
+        <div class="small">
+          他のページからこの画面へ移動するための方法です。<br><br>
+          <strong>リンクで遷移</strong>：<br>
+          <span class="mono">&lt;a href="/exchange.html#exchange"&gt;ポイント交換へ&lt;/a&gt;</span><br><br>
+          <strong>埋め込み（iframe）</strong>：<br>
+          <span class="mono">&lt;iframe src="/exchange.html" style="width:100%;height:680px;border:0"&gt;&lt;/iframe&gt;</span><br><br>
+          単体で使うなら気にしなくてOK。チームの別ページから合流させたいときに使います。
+        </div>
+      </div>
+    </details>
+  </main>
+
+  <!-- パーン！エフェクト層 -->
+  <div id="burstLayer" aria-hidden="true"></div>
+
+  <!-- 右下固定：ホームに戻る -->
+  <div class="floating floating-right" role="navigation" aria-label="ホームに戻る">
+    <a id="backHome" class="btn" href="./index.html">ホームに戻る</a>
+  </div>
+  <!-- 左下固定：現在のポイント -->
+  <div class="floating floating-left" aria-live="polite">
+    <span class="small">現在のポイント</span>
+    <span id="balanceFloating" class="pill-mini">0 pt</span>
+  </div>
+
+  <!-- 確認モーダル（数量つき） -->
+  <dialog id="confirmDialog">
+    <div class="modal">
+      <header><strong>交換の確認</strong></header>
+      <div class="content">
+        <div id="confirmText" style="line-height:1.7"></div>
+
+        <div class="separator"></div>
+
+        <div class="qtyWrap">
+          <div class="qtyBox" aria-label="数量">
+            <button id="decBtn" class="qtyBtn" aria-label="減らす">−</button>
+            <span id="qtyNum" class="qtyNum">1</span>
+            <button id="incBtn" class="qtyBtn" aria-label="増やす">＋</button>
+          </div>
+          <div class="infoLine small">
+            <span>必要ポイント合計：<strong id="totalCost">0pt</strong></span>
+            <span class="muted">（在庫：<span id="stockInfo">0</span> / 上限：<span id="maxInfo">0</span>）</span>
+          </div>
+          <div id="capNote" class="small muted"></div>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn-ghost" id="cancelBtn">キャンセル</button>
+        <button class="btn-primary" id="agreeBtn">同意して交換</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 完了モーダル -->
+  <dialog id="doneDialog">
+    <div class="modal">
+      <header><strong>交換が完了しました</strong></header>
+      <div class="content" id="doneText" style="line-height:1.7"></div>
+      <div class="actions">
+        <button class="btn-primary" id="doneCloseBtn">閉じる</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script>
+    // ====== 設定 ======
+    const STORAGE_PREFIX = "game_exchange_v1_";
+    const KEY_BALANCE = STORAGE_PREFIX + "balance";
+    const KEY_CATALOG = STORAGE_PREFIX + "catalog";
+    const KEY_HISTORY = STORAGE_PREFIX + "history";
+
+    // 仮構成（仮2のstockを9に変更）
+    const DEFAULT_CATALOG = [
+      { id: "gift-100",  name: "ギフト券 100円", cost: 1000, stock: 99, desc: "デジタルコード。即時付与。" },
+      { id: "placeholder-2", name: "仮2", cost: 100, stock: 9,  desc: "準備中のアイテムです。" },
+      { id: "placeholder-3", name: "仮3", cost: 100, stock: 99, desc: "準備中のアイテムです。" },
+      { id: "placeholder-4", name: "仮4", cost: 100, stock: 99, desc: "準備中のアイテムです。" },
+      { id: "placeholder-5", name: "仮5", cost: 100, stock: 99, desc: "準備中のアイテムです。" }
+    ];
+
+    // ====== ユーティリティ ======
+    const el   = (id) => document.getElementById(id);
+    const yen  = (n) => `${n} pt`;
+    const nowISO = () => new Date().toISOString();
+    function load(key, fallback) { try { const s = localStorage.getItem(key); return s ? JSON.parse(s) : fallback; } catch { return fallback; } }
+    function save(key, value) { localStorage.setItem(key, JSON.stringify(value)); }
+
+    // ====== ステート ======
+    let balance = load(KEY_BALANCE, 0);
+    let catalog = load(KEY_CATALOG, DEFAULT_CATALOG);
+    let history = load(KEY_HISTORY, []); // {id,name,cost,ts,qty}
+    let pendingItem = null;
+    let qty = 1;
+    let maxQty = 1;
+    let redeeming = false;
+
+    // ====== レンダリング ======
+    function renderBalance() {
+      el("balance").textContent = yen(balance);
+      el("balanceFloating").textContent = yen(balance);
+    }
+
+    function renderCatalog() {
+      const box = el("catalog");
+      box.innerHTML = "";
+      catalog.forEach(item => {
+        const soldOut = item.stock <= 0;
+        const can = balance >= item.cost && !soldOut;
+
+        const div = document.createElement("div");
+        div.className = "card item";
+        div.innerHTML = `
+          <div class="item-line">
+            <div class="item-content">
+              <div class="title">${item.name}</div>
+              <div class="small muted desc">${item.desc ?? ""}</div>
+              <div class="separator"></div>
+              <div class="small">必要：<strong>${item.cost}pt</strong>　/　在庫：<strong>${item.stock}</strong></div>
+            </div>
+            <div style="flex:0 0 auto">
+              ${soldOut
+                ? `<span class="btn-soldout" aria-disabled="true">SOLD&nbsp;OUT</span>`
+                : `<button class="btn-exchange" ${can ? "" : "disabled"} data-id="${item.id}">交換</button>`
+              }
+            </div>
+          </div>
+        `;
+        const btn = div.querySelector("button.btn-exchange");
+        if (btn) btn.addEventListener("click", () => openConfirm(item.id));
+        box.appendChild(div);
+      });
+    }
+
+    function renderHistory() {
+      const box = el("history");
+      if (!history.length) {
+        box.innerHTML = `<div class="muted small">まだ履歴がありません。</div>`;
+        return;
+      }
+      box.innerHTML = "";
+      history.slice().reverse().forEach(h => {
+        const d = new Date(h.ts);
+        const row = document.createElement("div");
+        row.className = "card";
+        row.innerHTML = `
+          <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+            <div><strong>${h.name}</strong> <span class="muted small">×${h.qty || 1}</span></div>
+            <div class="muted small">消費 ${h.cost * (h.qty || 1)}pt</div>
+            <div class="muted small">在庫反映ID: <span class="mono">${h.id}</span></div>
+            <div class="right"></div>
+            <div class="small">${d.toLocaleString()}</div>
+          </div>
+        `;
+        box.appendChild(row);
+      });
+    }
+
+    function flash(type, text) {
+      const box = el("msg");
+      box.innerHTML = `<div class="${type === "ok" ? "ok" : "error"}">${text}</div>`;
+      setTimeout(() => (box.innerHTML = ""), 3000);
+    }
+
+    // ====== 確認モーダル（数量調整） ======
+    const confirmDialog = el("confirmDialog");
+    const confirmText   = el("confirmText");
+    const decBtn        = el("decBtn");
+    const incBtn        = el("incBtn");
+    const qtyNum        = el("qtyNum");
+    const totalCostEl   = el("totalCost");
+    const stockInfoEl   = el("stockInfo");
+    const maxInfoEl     = el("maxInfo");
+    const capNoteEl     = el("capNote");
+    const agreeBtn      = el("agreeBtn");
+
+    function openConfirm(itemId) {
+      if (redeeming) return;
+      const item = catalog.find(x => x.id === itemId);
+      if (!item) return flash("error", "アイテムが見つかりません。");
+      if (item.stock <= 0) return flash("error", "在庫切れです。");
+      if (balance < item.cost) return flash("error", "ポイントが足りません。");
+
+      pendingItem = item;
+      maxQty = Math.max(1, Math.min(item.stock, Math.floor(balance / item.cost)));
+      qty = 1;
+
+      confirmText.innerHTML = `
+        <div>以下のアイテムを交換します。</div>
+        <div style="margin-top:8px"><strong>${item.name}</strong></div>
+        <div class="small muted" style="margin-top:4px">${item.desc ?? ""}</div>
+        <div style="margin-top:8px">単価：<strong>${item.cost}pt</strong></div>
+      `;
+      stockInfoEl.textContent = String(item.stock);
+      maxInfoEl.textContent   = String(maxQty);
+      updateQtyUI();
+
+      confirmDialog.showModal();
+    }
+
+    function updateQtyUI() {
+      qtyNum.textContent = String(qty);
+      totalCostEl.textContent = `${pendingItem.cost * qty}pt`;
+      decBtn.disabled = qty <= 1;
+      incBtn.disabled = qty >= maxQty;
+      if (qty >= maxQty) {
+        capNoteEl.textContent = `上限（${maxQty}個）に達しています。`;
+      } else {
+        capNoteEl.textContent = "";
+      }
+      const enoughPoints = balance >= pendingItem.cost * qty;
+      const enoughStock  = pendingItem.stock >= qty;
+      agreeBtn.disabled = !(enoughPoints && enoughStock);
+    }
+
+    decBtn.addEventListener("click", () => { if (qty > 1) { qty--; updateQtyUI(); } });
+    incBtn.addEventListener("click", () => { if (qty < maxQty) { qty++; updateQtyUI(); } });
+
+    // ====== 完了モーダル ======
+    const doneDialog = el("doneDialog");
+    const doneText   = el("doneText");
+
+    function openDone(entry) {
+      doneText.innerHTML = `
+        <div>以下のアイテムと交換しました。</div>
+        <div style="margin-top:8px"><strong>${entry.name}</strong> ×${entry.qty}</div>
+        <div style="margin-top:8px">消費ポイント：<strong>${entry.cost * entry.qty}pt</strong></div>
+        <div class="small muted" style="margin-top:12px">残高：<strong>${balance}pt</strong></div>
+      `;
+      doneDialog.showModal();
+      burst();
+    }
+
+    // ====== パーン！エフェクト ======
+    function burst() {
+      const layer = document.getElementById("burstLayer");
+      const W = window.innerWidth, H = window.innerHeight;
+      const cx = W / 2, cy = H / 3;
+      const colors = ["#ff5252","#ffb74d","#fff176","#81c784","#64b5f6","#ba68c8","#f06292","#a1887f"];
+      const count  = 36;
+      for (let i = 0; i < count; i++) {
+        const node = document.createElement("span");
+        node.className = "particle";
+        const angle = (i / count) * Math.PI * 2 + (Math.random() * 0.6 - 0.3);
+        const dist  = 160 + Math.random() * 240;
+        const tx    = Math.cos(angle) * dist;
+        const ty    = Math.sin(angle) * dist;
+        const size  = (6 + Math.random()*10) + "px";
+        const rot   = (Math.random()*720 - 360) + "deg";
+        node.style.setProperty("--x", `${cx + (Math.random()*24 - 12)}px`);
+        node.style.setProperty("--y", `${cy + (Math.random()*24 - 12)}px`);
+        node.style.setProperty("--tx", `${tx}px`);
+        node.style.setProperty("--ty", `${ty}px`);
+        node.style.setProperty("--rot", rot);
+        node.style.setProperty("--size", size);
+        node.style.background = colors[Math.floor(Math.random()*colors.length)];
+        node.style.animationDelay = (Math.random()*90) + "ms";
+        layer.appendChild(node);
+        node.addEventListener("animationend", () => node.remove());
+      }
+      const flashDiv = document.createElement("div");
+      flashDiv.style.position = "fixed";
+      flashDiv.style.inset = "0";
+      flashDiv.style.background = "rgba(255,255,255,0.55)";
+      flashDiv.style.pointerEvents = "none";
+      flashDiv.style.zIndex = "9998";
+      flashDiv.style.opacity = "0";
+      flashDiv.style.transition = "opacity 160ms ease-out";
+      document.body.appendChild(flashDiv);
+      requestAnimationFrame(()=>{ flashDiv.style.opacity = "1"; });
+      setTimeout(()=>{ flashDiv.style.opacity = "0"; flashDiv.addEventListener("transitionend", ()=>flashDiv.remove(), {once:true}); }, 160);
+    }
+
+    // ====== 交換ロジック ======
+    function redeem(itemId, quantity) {
+      if (redeeming) return;
+      const idx = catalog.findIndex(x => x.id === itemId);
+      if (idx < 0) return flash("error", "アイテムが見つかりません。");
+
+      const item = catalog[idx];
+      const q = Math.max(1, Math.floor(quantity || 1));
+
+      if (item.stock < q) return flash("error", "在庫が足りません。");
+      const totalCost = item.cost * q;
+      if (balance < totalCost) return flash("error", "ポイントが足りません。");
+
+      redeeming = true;
+      try {
+        balance -= totalCost;
+        catalog[idx] = { ...item, stock: item.stock - q };
+        const entry = { id: item.id, name: item.name, cost: item.cost, qty: q, ts: nowISO() };
+        history.push(entry);
+
+        save(KEY_BALANCE, balance);
+        save(KEY_CATALOG, catalog);
+        save(KEY_HISTORY, history);
+
+        renderBalance();
+        renderCatalog();   // 在庫0なら SOLD OUT に切り替わる
+        renderHistory();
+
+        openDone(entry);
+      } finally {
+        redeeming = false;
+      }
+    }
+
+    // ====== イベント ======
+    document.getElementById("grantBtn").addEventListener("click", () => {
+      const add = Math.max(0, parseInt(document.getElementById("grantInput").value || "0", 10));
+      balance += add; save(KEY_BALANCE, balance); renderBalance();
+      flash("ok", `${add}pt 付与しました（テスト）。`);
+    });
+
+    document.getElementById("resetBtn").addEventListener("click", () => {
+      if (!confirm("ローカルの残高・カタログ・履歴を初期化します。よろしいですか？")) return;
+      balance = 0;
+      catalog = JSON.parse(JSON.stringify(DEFAULT_CATALOG));
+      history = [];
+      save(KEY_BALANCE, balance); save(KEY_CATALOG, catalog); save(KEY_HISTORY, history);
+      renderBalance(); renderCatalog(); renderHistory();
+      flash("ok", "初期化しました。");
+    });
+
+    document.getElementById("clearHistoryBtn").addEventListener("click", () => {
+      if (!confirm("履歴を削除します。よろしいですか？")) return;
+      history = []; save(KEY_HISTORY, history); renderHistory(); flash("ok", "履歴をクリアしました。");
+    });
+
+    // 確認モーダルのボタン
+    document.getElementById("cancelBtn").addEventListener("click", () => {
+      confirmDialog.close(); pendingItem = null;
+    });
+    document.getElementById("agreeBtn").addEventListener("click", () => {
+      if (!pendingItem) return confirmDialog.close();
+      const id = pendingItem.id; const q  = qty;
+      pendingItem = null; confirmDialog.close(); redeem(id, q);
+    });
+
+    // 完了モーダル
+    document.getElementById("doneCloseBtn").addEventListener("click", () => doneDialog.close());
+
+    // ====== 初期表示 ======
+    renderBalance();
+    renderCatalog();
+    renderHistory();
+
+    if (location.hash === "#exchange") {
+      document.getElementById("exchange").scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  </script>
+</body>
+</html>
