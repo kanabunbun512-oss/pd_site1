@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fridge Master: Zero Waste</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            overflow: hidden;
+            background-color: #f1f5f9;
+            color: #1a202c;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            user-select: none;
+        }
+        canvas {
+            display: block;
+            box-shadow: inset 0 0 100px rgba(0,0,0,0.05);
+        }
+        #ui-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            padding: 24px;
+            box-sizing: border-box;
+            z-index: 10;
+        }
+        .hud-panel {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 16px;
+            padding: 12px 24px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+            border: 2px solid #e2e8f0;
+        }
+        .waste-bar-container {
+            width: 300px;
+            height: 24px;
+            background: #e2e8f0;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 2px solid #cbd5e1;
+            position: relative;
+        }
+        .skill-icon {
+            width: 70px;
+            height: 70px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 32px;
+            background: #cbd5e1;
+            color: #64748b;
+            border: 4px solid #fff;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            transition: all 0.2s;
+        }
+        .skill-icon.ready {
+            background: linear-gradient(135deg, #60a5fa, #3b82f6);
+            border-color: #dbeafe;
+            box-shadow: 0 0 20px #60a5fa;
+            transform: scale(1.05);
+            cursor: pointer;
+            pointer-events: auto;
+        }
+        .skill-icon.ready:active {
+            transform: scale(0.95);
+        }
+        /* Frost effect overlay */
+        .frost-overlay {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: radial-gradient(circle, transparent 60%, rgba(255,255,255,0.7) 100%);
+            pointer-events: none;
+            opacity: 0.2;
+        }
+        /* Recipe Overlay Styles */
+        #recipeOverlay {
+            transition: opacity 0.2s;
+            opacity: 0;
+            pointer-events: none;
+        }
+        #recipeOverlay.visible {
+            opacity: 1;
+        }
+    </style>
+</head>
+<body>
+
+<!-- UI Layer -->
+<div id="ui-layer">
+    <!-- Top HUD -->
+    <div class="flex justify-between items-start">
+        <!-- Score & Time -->
+        <div class="hud-panel min-w-[200px]">
+            <div class="text-xs font-bold text-yellow-600 mb-1">
+               BEST: <span id="highScoreDisplay">0</span>
+           </div>
+            <div class="text-3xl font-black text-slate-800 tracking-tight">SCORE: <span id="scoreDisplay">0</span></div>
+            <div class="flex justify-between items-center mt-1">
+                <div class="text-sm text-slate-500 font-bold">⏱️ TIME: <span id="timeDisplay">00:00</span></div>
+                <div class="text-sm text-slate-500 font-bold ml-4">🍽️ DISH: <span id="comboDisplay">0</span></div>
+            </div>
+        </div>
+
+        <!-- Waste Meter -->
+        <div class="hud-panel flex flex-col items-end">
+            <div class="text-xs font-bold text-red-500 mb-1 uppercase tracking-wider">🗑️ Waste Level</div>
+            <div class="waste-bar-container">
+                <div id="wasteBar" class="h-full bg-gradient-to-r from-yellow-400 to-red-500 w-0 transition-all duration-300 ease-out"></div>
+            </div>
+            <div class="text-xs text-slate-400 mt-1">Don't let food rot!</div>
+        </div>
+    </div>
+
+    <!-- Recipe Overlay (Hidden by default) -->
+    <div id="recipeOverlay" class="absolute inset-0 flex items-center justify-center bg-black/60 z-40 backdrop-blur-sm">
+        <div class="bg-white/95 p-6 rounded-2xl shadow-2xl max-w-2xl w-full border-4 border-yellow-400">
+            <h2 class="text-3xl font-bold text-center mb-4 text-slate-800 border-b-2 border-slate-200 pb-2">📖 RECIPE BOOK</h2>
+            <div class="grid grid-cols-2 gap-4" id="recipeListContainer">
+                <!-- Recipes injected here via JS -->
+            </div>
+            <div class="text-center mt-4 text-sm text-slate-500 font-bold">Release [TAB] to Close</div>
+        </div>
+    </div>
+
+    <!-- Bottom HUD -->
+    <div class="flex justify-between items-end w-full">
+        <!-- Controls Hint -->
+        <div class="hud-panel text-sm text-slate-600 hidden md:block font-medium">
+            <p><span class="bg-slate-200 px-2 py-0.5 rounded text-slate-800">WASD</span> Move 🏃</p>
+            <p><span class="bg-slate-200 px-2 py-0.5 rounded text-slate-800">E</span> Freeze Skill ❄️</p>
+            <p><span class="bg-slate-200 px-2 py-0.5 rounded text-slate-800">TAB</span> Recipes 📖</p>
+            <p><span class="bg-slate-200 px-2 py-0.5 rounded text-slate-800">ESC</span> Pause ⏸️</p>
+        </div>
+
+        <!-- PowerUp Status -->
+        <div id="powerUpStatus" class="hidden absolute bottom-24 left-1/2 -translate-x-1/2 bg-purple-600 text-white font-bold px-4 py-2 rounded-full shadow-lg animate-pulse z-20">
+            POWERUP ACTIVE
+        </div>
+
+        <!-- Skill Indicator -->
+        <div class="flex flex-col items-center pointer-events-auto cursor-pointer" id="skillBtn">
+            <div id="skillIcon" class="skill-icon">❄️</div>
+            <div class="mt-2 font-bold text-blue-600 text-shadow-white text-sm bg-white/90 px-3 py-1 rounded-full shadow-sm">
+                [E] FREEZE
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="frost-overlay"></div>
+
+<!-- Screens -->
+<div id="pauseScreen" class="hidden absolute inset-0 bg-black/30 backdrop-blur-md z-50 flex items-center justify-center flex-col pointer-events-auto">
+    <h2 class="text-6xl font-black text-white mb-6 drop-shadow-lg">⏸️ PAUSED</h2>
+    <button id="resumeBtn" class="px-10 py-4 bg-white text-slate-900 font-bold rounded-full hover:bg-slate-100 transition shadow-xl text-xl">
+        RESUME
+    </button>
+</div>
+
+<div id="startScreen" class="absolute inset-0 bg-slate-900 z-50 flex items-center justify-center flex-col text-center p-8 pointer-events-auto">
+    <div class="mb-4 text-7xl animate-bounce">👨‍🍳</div>
+    <h1 class="text-5xl md:text-7xl font-black text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-green-400 mb-2">
+        Fridge Master
+    </h1>
+    <h2 class="text-2xl text-slate-300 font-light mb-8 tracking-widest uppercase">Zero Waste Cooking</h2>
+    
+    <div class="bg-slate-800/80 p-8 rounded-2xl max-w-lg w-full mb-8 border border-slate-700 backdrop-blur-sm">
+        <h3 class="text-green-400 font-bold mb-6 text-xl border-b border-slate-700 pb-2">🍳 COOKING GUIDE</h3>
+        <ul class="text-left text-slate-300 space-y-4 text-lg">
+            <li class="flex items-center"><span class="text-3xl mr-4">🏃</span> <span><b class="text-white">WASD</b> でシェフ移動</span></li>
+            <li class="flex items-center"><span class="text-3xl mr-4">🍲</span> <span><b class="text-yellow-300">肉+野菜=炒め物</b> などペアで高得点！</span></li>
+            <li class="flex items-center"><span class="text-3xl mr-4">📖</span> <span><b class="text-white">TABキー</b> を押している間レシピ確認</span></li>
+            <li class="flex items-center"><span class="text-3xl mr-4">🎁</span> <span><b class="text-purple-400">アイテム(🧲👟)</b> で有利に進めよう</span></li>
+        </ul>
+    </div>
+    
+    <div class="mb-4 text-yellow-500 font-bold">
+        BEST SCORE: <span id="startBestScore">0</span>
+    </div>
+
+    <button id="startBtn" class="px-12 py-5 bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-400 hover:to-emerald-500 text-white font-bold rounded-full text-2xl shadow-2xl transition transform hover:scale-105 active:scale-95">
+        START COOKING
+    </button>
+</div>
+
+<div id="gameOverScreen" class="hidden absolute inset-0 bg-red-900/95 z-50 flex items-center justify-center flex-col text-center backdrop-blur-sm pointer-events-auto">
+    <div class="text-8xl mb-4">😱</div>
+    <h1 class="text-6xl font-black text-white mb-2">WASTED!</h1>
+    
+    <div id="newRecordMsg" class="hidden text-yellow-300 font-bold text-2xl animate-pulse mb-4">🏆 NEW RECORD! 🏆</div>
+
+    <div class="bg-black/20 p-8 rounded-2xl mb-8 border border-white/10">
+        <div class="text-sm text-red-200 uppercase tracking-widest mb-1">Final Score</div>
+        <div class="text-6xl font-black text-yellow-400" id="finalScore">0</div>
+        <div class="text-sm text-slate-300 mt-2">Time Alive: <span id="finalTime">00:00</span></div>
+    </div>
+    
+    <button id="retryBtn" class="px-10 py-4 bg-white text-red-900 font-bold rounded-full hover:bg-red-50 transition shadow-xl text-xl">
+        TRY AGAIN 🔄
+    </button>
+</div>
+
+<canvas id="gameCanvas"></canvas>
+
+<script>
+/**
+ * Fridge Master: Zero Waste (HTML/JS Version)
+ */
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+// --- Constants ---
+const PLAYER_SPEED_BASE = 5;
+const SPAWN_RATE_INITIAL = 70;
+const SKILL_COOLDOWN_MAX = 1500;
+const MAX_WASTE = 100;
+const FPS = 60;
+const FRAME_INTERVAL = 1000 / FPS;
+
+const FOOD_TYPES = [
+  { name: 'Tomato', icon: '🍅', type: 'food' },
+  { name: 'Cheese', icon: '🧀', type: 'food' },
+  { name: 'Meat',   icon: '🥩', type: 'food' },
+  { name: 'Veggie', icon: '🥬', type: 'food' },
+  { name: 'Milk',   icon: '🥛', type: 'food' },
+  { name: 'Egg',    icon: '🥚', type: 'food' },
+  { name: 'Bread',  icon: '🍞', type: 'food' },
+  { name: 'Fish',   icon: '🐟', type: 'food' }
+];
+
+const POWERUPS = [
+  { name: 'Magnet', icon: '🧲', type: 'powerup', effectType: 'magnet', duration: 600 }, 
+  { name: 'Speed',  icon: '👟', type: 'powerup', effectType: 'speed', duration: 600 }, 
+];
+
+const RECIPES = [
+  { ingredients: ['Meat', 'Veggie'], name: '野菜炒め', score: 200, icon: '🥘' },
+  { ingredients: ['Tomato', 'Cheese'], name: 'カプレーゼ', score: 200, icon: '🥗' },
+  { ingredients: ['Bread', 'Meat'], name: 'サンドイッチ', score: 200, icon: '🥪' },
+  { ingredients: ['Bread', 'Cheese'], name: 'チーズトースト', score: 200, icon: '🍞' },
+  { ingredients: ['Fish', 'Veggie'], name: 'ムニエル', score: 200, icon: '🍽️' },
+  { ingredients: ['Milk', 'Egg'], name: 'プリン', score: 200, icon: '🍮' },
+  { ingredients: ['Tomato', 'Veggie'], name: 'サラダ', score: 200, icon: '🥗' },
+  { ingredients: ['Meat', 'Cheese'], name: 'チーズハンバーグ', score: 200, icon: '🍖' },
+  { ingredients: ['Bread', 'Egg'], name: 'フレンチトースト', score: 200, icon: '🍳' },
+  { ingredients: ['Fish', 'Tomato'], name: 'アクアパッツァ', score: 200, icon: '🍲' }
+];
+
+// --- Game State ---
+let gameState = 'START'; // START, PLAYING, PAUSED, GAMEOVER
+let frames = 0;
+let score = 0;
+let highScore = 0;
+let wasteLevel = 0;
+let combo = 0;
+let comboTimer = 0;
+let spawnRate = SPAWN_RATE_INITIAL;
+let difficultyMultiplier = 1;
+let lastFrameTime = 0;
+let shakeTimer = 0;
+
+let items = [];
+let particles = [];
+
+let player = {
+    x: 0, y: 0, w: 60, h: 60,
+    skillCooldown: 0, heldItem: null, direction: 1,
+    activePowerUp: null, powerUpTimer: 0, moveAnim: 0
+};
+
+const keys = {};
+
+// --- Initialization ---
+function init() {
+    // Load High Score
+    const savedScore = localStorage.getItem('fridge-master-highscore');
+    if (savedScore) highScore = parseInt(savedScore, 10);
+    document.getElementById('startBestScore').innerText = highScore;
+    document.getElementById('highScoreDisplay').innerText = highScore;
+
+    // Render Recipe List
+    const container = document.getElementById('recipeListContainer');
+    container.innerHTML = '';
+    
+    const getIcon = (name) => FOOD_TYPES.find(f => f.name === name)?.icon || '❓';
+
+    RECIPES.forEach(r => {
+        const div = document.createElement('div');
+        div.className = "flex items-center justify-between bg-slate-100 p-2 rounded shadow-sm border border-slate-200";
+        div.innerHTML = `
+            <div class="flex items-center gap-2">
+                <span class="text-xl bg-white rounded-full p-1 w-8 h-8 flex items-center justify-center shadow-sm">${getIcon(r.ingredients[0])}</span>
+                <span class="text-slate-400">+</span>
+                <span class="text-xl bg-white rounded-full p-1 w-8 h-8 flex items-center justify-center shadow-sm">${getIcon(r.ingredients[1])}</span>
+            </div>
+            <div class="text-right">
+                <div class="font-bold text-slate-800 text-sm">${r.name}</div>
+                <div class="text-xs font-bold text-yellow-600">${r.score}pts</div>
+            </div>
+        `;
+        container.appendChild(div);
+    });
+
+    resize();
+    window.addEventListener('resize', resize);
+    
+    // Start loop
+    requestAnimationFrame(gameLoop);
+}
+
+function resize() {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+    if (gameState === 'START') {
+        player.x = canvas.width / 2 - player.w / 2;
+        player.y = canvas.height / 2 - player.h / 2;
+    }
+}
+
+// --- Input Handling ---
+window.addEventListener('keydown', (e) => {
+    if (e.code === 'KeyE') {
+        if (gameState === 'PLAYING') useSkill();
+    }
+    if (e.code === 'Escape') {
+        togglePause();
+    }
+    if (e.code === 'Tab') {
+        e.preventDefault();
+        document.getElementById('recipeOverlay').classList.add('visible');
+    }
+
+    const key = e.key.toLowerCase();
+    if (['w', 'a', 's', 'd'].includes(key)) keys[key] = true;
+    keys[e.code] = true;
+});
+
+window.addEventListener('keyup', (e) => {
+    if (e.code === 'Tab') {
+        e.preventDefault();
+        document.getElementById('recipeOverlay').classList.remove('visible');
+    }
+    const key = e.key.toLowerCase();
+    if (['w', 'a', 's', 'd'].includes(key)) keys[key] = false;
+    keys[e.code] = false;
+});
+
+// Button Listeners
+document.getElementById('startBtn').addEventListener('click', startGame);
+document.getElementById('retryBtn').addEventListener('click', startGame);
+document.getElementById('resumeBtn').addEventListener('click', togglePause);
+document.getElementById('skillBtn').addEventListener('click', () => {
+    if (gameState === 'PLAYING') useSkill();
+});
+
+// --- Core Game Functions ---
+function startGame() {
+    gameState = 'PLAYING';
+    
+    // Reset state
+    score = 0;
+    wasteLevel = 0;
+    combo = 0;
+    frames = 0;
+    difficultyMultiplier = 1;
+    items = [];
+    particles = [];
+    spawnRate = SPAWN_RATE_INITIAL;
+    shakeTimer = 0;
+    
+    player.x = canvas.width / 2 - player.w / 2;
+    player.y = canvas.height / 2 - player.h / 2;
+    player.skillCooldown = 0;
+    player.heldItem = null;
+    player.activePowerUp = null;
+    player.powerUpTimer = 0;
+    player.moveAnim = 0;
+    
+    lastFrameTime = 0;
+
+    // UI Updates
+    document.getElementById('startScreen').style.display = 'none';
+    document.getElementById('gameOverScreen').classList.add('hidden');
+    document.getElementById('pauseScreen').classList.add('hidden');
+    updateHUD();
+}
+
+function togglePause() {
+    if (gameState === 'GAMEOVER' || gameState === 'START') return;
+    
+    if (gameState === 'PLAYING') {
+        gameState = 'PAUSED';
+        document.getElementById('pauseScreen').classList.remove('hidden');
+    } else {
+        gameState = 'PLAYING';
+        document.getElementById('pauseScreen').classList.add('hidden');
+        lastFrameTime = performance.now(); 
+    }
+}
+
+function gameOver() {
+    gameState = 'GAMEOVER';
+    triggerShake(20);
+    
+    const timeStr = formatTimeSeconds(Math.floor(frames / 60));
+    let isNewRecord = false;
+    if (score > highScore) {
+        highScore = score;
+        localStorage.setItem('fridge-master-highscore', score.toString());
+        isNewRecord = true;
+    }
+
+    // UI Updates
+    document.getElementById('finalScore').innerText = score;
+    document.getElementById('finalTime').innerText = timeStr;
+    document.getElementById('gameOverScreen').classList.remove('hidden');
+    
+    const newRecordMsg = document.getElementById('newRecordMsg');
+    if(isNewRecord) {
+        newRecordMsg.classList.remove('hidden');
+    } else {
+        newRecordMsg.classList.add('hidden');
+    }
+}
+
+// --- Logic ---
+function useSkill() {
+    if (player.skillCooldown > 0) return;
+    player.skillCooldown = SKILL_COOLDOWN_MAX;
+    createShockwave(player.x + player.w/2, player.y + player.h/2);
+    triggerShake(10); 
+
+    items.forEach(item => {
+        if (item.type.type === 'food' && item.freshness > 0) {
+            item.freshness = 100;
+            createSingleSparkle(item.x, item.y, '❄️');
+        }
+    });
+    showFloatText(player.x, player.y - 60, "FROZEN! ❄️", "#60a5fa");
+    updateHUD();
+}
+
+function spawnItem() {
+    const size = 50; 
+    const padding = 60;
+    let x, y, dist;
+    do {
+        x = padding + Math.random() * (canvas.width - padding * 2);
+        y = padding + Math.random() * (canvas.height - padding * 2);
+        const dx = x - player.x;
+        const dy = y - player.y;
+        dist = Math.sqrt(dx*dx + dy*dy);
+    } while (dist < 150);
+
+    const isPowerUp = Math.random() < 0.05; 
+    let type;
+    
+    if (isPowerUp) {
+        type = POWERUPS[Math.floor(Math.random() * POWERUPS.length)];
+    } else {
+        type = FOOD_TYPES[Math.floor(Math.random() * FOOD_TYPES.length)];
+    }
+
+    items.push({
+        x: x, y: y, size: size,
+        type: type,
+        freshness: 100,
+        decaySpeed: (0.065 + (Math.random() * 0.04)) * difficultyMultiplier,
+        scale: 0 
+    });
+}
+
+function checkRecipe(item1, item2) {
+    const pair = [item1.name, item2.name].sort().join(',');
+    for (let recipe of RECIPES) {
+        const recipePair = [...recipe.ingredients].sort().join(',');
+        if (pair === recipePair) return recipe;
+    }
+    return null;
+}
+
+function update() {
+    frames++;
+    
+    // Difficulty
+    if (frames % 1200 === 0) {
+        difficultyMultiplier += 0.02;
+        spawnRate = Math.max(30, spawnRate - 1);
+    }
+
+    if (shakeTimer > 0) shakeTimer--;
+
+    // PowerUp
+    let currentSpeed = PLAYER_SPEED_BASE;
+    let pickupRadius = player.w / 2;
+
+    if (player.activePowerUp) {
+        player.powerUpTimer--;
+        if (player.activePowerUp === 'speed') currentSpeed *= 1.5;
+        if (player.activePowerUp === 'magnet') pickupRadius *= 3.5; 
+        
+        if (player.powerUpTimer <= 0) {
+            player.activePowerUp = null;
+        }
+    }
+
+    // Player Move
+    let dx = 0; let dy = 0;
+    if (keys['w'] || keys['ArrowUp']) dy = -1;
+    if (keys['s'] || keys['ArrowDown']) dy = 1;
+    if (keys['a'] || keys['ArrowLeft']) dx = -1;
+    if (keys['d'] || keys['ArrowRight']) dx = 1;
+
+    // Animation squash/stretch
+    if (dx !== 0 || dy !== 0) {
+        player.moveAnim += 0.2;
+        const len = Math.sqrt(dx*dx + dy*dy);
+        dx /= len; dy /= len;
+        if (dx !== 0) player.direction = dx > 0 ? 1 : -1;
+    } else {
+        player.moveAnim = 0;
+    }
+
+    player.x += dx * currentSpeed;
+    player.y += dy * currentSpeed;
+    player.x = Math.max(0, Math.min(canvas.width - player.w, player.x));
+    player.y = Math.max(0, Math.min(canvas.height - player.h, player.y));
+
+    if (frames % Math.floor(spawnRate) === 0) {
+        spawnItem();
+    }
+
+    if (player.skillCooldown > 0) player.skillCooldown--;
+
+    if (combo > 0) {
+        comboTimer--;
+        if (comboTimer <= 0) combo = 0;
+    }
+
+    // Items
+    for (let i = items.length - 1; i >= 0; i--) {
+        let item = items[i];
+        
+        if (item.scale < 1) item.scale += 0.1;
+
+        if (item.type.type === 'food') {
+            item.freshness -= item.decaySpeed;
+        } else {
+            item.freshness -= 0.1;
+        }
+
+        const pCenterX = player.x + player.w/2;
+        const pCenterY = player.y + player.h/2;
+        const dist = Math.sqrt((pCenterX - item.x)**2 + (pCenterY - item.y)**2);
+        
+        // Magnet
+        if (player.activePowerUp === 'magnet' && item.type.type === 'food' && dist < 250) {
+            item.x += (pCenterX - item.x) * 0.08;
+            item.y += (pCenterY - item.y) * 0.08;
+        }
+
+        // Collision
+        if (dist < (pickupRadius + item.size/2)) {
+            if (item.type.type === 'powerup') {
+                player.activePowerUp = item.type.effectType;
+                player.powerUpTimer = item.type.duration;
+                createSingleSparkle(item.x, item.y, item.type.icon);
+                showFloatText(item.x, item.y, `${item.type.name.toUpperCase()}!`, "#a855f7");
+                items.splice(i, 1);
+                continue;
+            }
+
+            const food = item.type;
+            if (item.freshness > 0) {
+                if (!player.heldItem) {
+                    player.heldItem = food;
+                    createSingleSparkle(item.x, item.y, '✨');
+                } else {
+                    const recipe = checkRecipe(player.heldItem, food);
+                    if (recipe) {
+                        combo++;
+                        comboTimer = 150;
+                        const dishScore = Math.floor((recipe.score + (combo * 30)) * difficultyMultiplier);
+                        score += dishScore;
+                        createSingleSparkle(item.x, item.y, recipe.icon);
+                        showFloatText(item.x, item.y, `${recipe.name}! +${dishScore}`, "#facc15");
+                        triggerShake(5); 
+                    } else {
+                        const baseScore = 50 * difficultyMultiplier;
+                        score += Math.floor(baseScore);
+                        createSingleSparkle(item.x, item.y, '🍲');
+                        showFloatText(item.x, item.y, `創作料理 +${Math.floor(baseScore)}`, "#94a3b8");
+                    }
+                    player.heldItem = null;
+                }
+            } else {
+                wasteLevel += 15;
+                combo = 0;
+                triggerShake(10);
+                
+                if (player.heldItem) {
+                    wasteLevel += 5;
+                    showFloatText(player.x, player.y - 20, "DROPPED!", "#ef4444");
+                    player.heldItem = null;
+                } else {
+                    showFloatText(item.x, item.y, "YUCK!", "#ef4444");
+                }
+                createSludge(item.x, item.y);
+            }
+            items.splice(i, 1);
+            continue;
+        }
+
+        if (item.freshness < -25) {
+            wasteLevel += 10;
+            combo = 0;
+            showFloatText(item.x, item.y, "WASTE!", "#713f12");
+            createSludge(item.x, item.y);
+            triggerShake(5);
+            items.splice(i, 1);
+        }
+    }
+
+    if (wasteLevel >= MAX_WASTE) {
+        wasteLevel = MAX_WASTE;
+        gameOver();
+    }
+
+    // Particles
+    for (let i = particles.length - 1; i >= 0; i--) {
+        let p = particles[i];
+        p.life -= 0.02;
+        p.x += p.vx;
+        p.y += p.vy;
+        
+        if(p.type === 'text') p.vy += 0.1;
+
+        if (p.life <= 0) particles.splice(i, 1);
+    }
+    
+    updateHUD();
+}
+
+function updateHUD() {
+    document.getElementById('scoreDisplay').innerText = score.toLocaleString();
+    document.getElementById('highScoreDisplay').innerText = highScore.toLocaleString();
+    
+    const elapsedTime = Math.floor(frames / 60);
+    document.getElementById('timeDisplay').innerText = formatTimeSeconds(elapsedTime);
+    document.getElementById('comboDisplay').innerText = combo;
+    
+    const wasteBar = document.getElementById('wasteBar');
+    wasteBar.style.width = `${(wasteLevel / MAX_WASTE) * 100}%`;
+    
+    if (wasteLevel > 70) {
+        wasteBar.className = "h-full bg-gradient-to-r from-red-500 to-red-600 w-0 transition-all duration-100 ease-out animate-pulse";
+    } else {
+        wasteBar.className = "h-full bg-gradient-to-r from-yellow-400 to-red-500 w-0 transition-all duration-300 ease-out";
+    }
+    
+    const skillIcon = document.getElementById('skillIcon');
+    if (player.skillCooldown <= 0) {
+        skillIcon.classList.add('ready');
+        skillIcon.style.opacity = '1';
+        skillIcon.innerHTML = "❄️";
+    } else {
+        skillIcon.classList.remove('ready');
+        skillIcon.style.opacity = '0.5';
+        const sec = Math.ceil(player.skillCooldown / 60);
+        skillIcon.innerText = sec;
+    }
+
+    const puStatus = document.getElementById('powerUpStatus');
+    if (player.activePowerUp) {
+        const timeLeft = Math.ceil(player.powerUpTimer / 60);
+        const icon = player.activePowerUp === 'magnet' ? '🧲' : '👟';
+        puStatus.style.display = 'block';
+        puStatus.innerText = `${icon} ${timeLeft}s`;
+    } else {
+        puStatus.style.display = 'none';
+    }
+}
+
+function formatTimeSeconds(sec) {
+    const m = Math.floor(sec / 60).toString().padStart(2, '0');
+    const s = (sec % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+}
+
+// --- Drawing ---
+function draw() {
+    ctx.save();
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // Screen Shake
+    if (shakeTimer > 0) {
+        const intensity = shakeTimer > 10 ? 5 : 2;
+        const sx = (Math.random() - 0.5) * intensity;
+        const sy = (Math.random() - 0.5) * intensity;
+        ctx.translate(sx, sy);
+    }
+
+    // Danger Vignette
+    if (wasteLevel > 70) {
+        const opacity = 0.2 + Math.sin(frames * 0.1) * 0.1;
+        const grad = ctx.createRadialGradient(
+            canvas.width/2, canvas.height/2, canvas.height/2,
+            canvas.width/2, canvas.height/2, canvas.height
+        );
+        grad.addColorStop(0, 'rgba(239, 68, 68, 0)');
+        grad.addColorStop(1, `rgba(239, 68, 68, ${opacity})`);
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+
+    // Grid
+    ctx.strokeStyle = '#e2e8f0';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for(let x=0; x<canvas.width; x+=100) { ctx.moveTo(x,0); ctx.lineTo(x,canvas.height); }
+    for(let y=0; y<canvas.height; y+=100) { ctx.moveTo(0,y); ctx.lineTo(canvas.width,y); }
+    ctx.stroke();
+
+    if (gameState === 'PLAYING' || gameState === 'PAUSED') {
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        // Draw Items
+        items.forEach(item => {
+            let icon = item.type.icon;
+            const scale = item.scale;
+
+            if (item.type.type === 'powerup') {
+                const pulse = 1 + Math.sin(frames * 0.2) * 0.1;
+                ctx.save();
+                ctx.translate(item.x, item.y);
+                ctx.scale(scale * pulse, scale * pulse);
+                ctx.font = `${item.size}px Arial`;
+                ctx.fillText(icon, 0, 0);
+                ctx.restore();
+                return;
+            }
+
+            if (item.freshness <= 0) {
+                icon = '🦠';
+            } else if (item.freshness < 30) {
+                if (Math.floor(frames / 10) % 2 === 0) ctx.globalAlpha = 0.6;
+            }
+
+            ctx.save();
+            ctx.translate(item.x, item.y);
+            ctx.scale(scale, scale);
+            ctx.font = `${item.size}px "Segoe UI Emoji", Arial`;
+            ctx.fillText(icon, 0, 0);
+            ctx.restore();
+            
+            ctx.globalAlpha = 1.0; 
+
+            if (item.freshness > 0) {
+                const barW = 40;
+                const barH = 5;
+                const pct = item.freshness / 100;
+                ctx.fillStyle = '#cbd5e1';
+                ctx.fillRect(item.x - barW/2, item.y - item.size/2 - 10, barW, barH);
+                ctx.fillStyle = pct > 0.5 ? '#4ade80' : (pct > 0.2 ? '#facc15' : '#ef4444');
+                ctx.fillRect(item.x - barW/2, item.y - item.size/2 - 10, barW * pct, barH);
+            }
+        });
+
+        // Draw Player
+        ctx.save();
+        ctx.translate(player.x + player.w/2, player.y + player.h/2);
+        
+        // Squash & Stretch
+        const stretch = Math.sin(player.moveAnim) * 0.1;
+        const scaleX = 1 + stretch;
+        const scaleY = 1 - stretch;
+        
+        // PowerUp Aura
+        if (player.activePowerUp) {
+            ctx.fillStyle = player.activePowerUp === 'magnet' ? 'rgba(168, 85, 247, 0.3)' : 'rgba(59, 130, 246, 0.3)';
+            ctx.beginPath();
+            ctx.arc(0, 0, 45 + Math.sin(frames * 0.2)*5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        ctx.scale(scaleX, scaleY); // Apply squash
+
+        ctx.fillStyle = '#fcd34d'; 
+        ctx.beginPath();
+        ctx.arc(0, 0, 34, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = '#ffffff'; 
+        ctx.lineWidth = 3;
+        ctx.stroke();
+
+        ctx.fillStyle = 'rgba(0,0,0,0.2)'; 
+        ctx.beginPath();
+        ctx.ellipse(0, 35, 30, 10, 0, 0, Math.PI*2);
+        ctx.fill();
+
+        if (player.direction === -1) ctx.scale(-1, 1);
+        ctx.font = "60px Arial";
+        ctx.fillText("👨‍🍳", 0, 2); 
+        
+        ctx.scale(1/scaleX, 1/scaleY); // Reset scale
+        if (player.direction === -1) ctx.scale(-1, 1); // Reset flip
+
+        if (player.heldItem) {
+            const yOffset = -30 * scaleY; 
+            ctx.font = "30px Arial";
+            ctx.shadowColor = "rgba(0,0,0,0.3)";
+            ctx.shadowBlur = 4;
+            ctx.fillText(player.heldItem.icon, 25, yOffset);
+            ctx.shadowBlur = 0;
+            ctx.font = "20px Arial";
+            ctx.fillStyle = "#64748b";
+            ctx.fillText("➕", 50, yOffset);
+        }
+        
+        ctx.restore();
+
+        // Draw Particles
+        particles.forEach(p => {
+            ctx.save();
+            ctx.globalAlpha = p.life;
+            if (p.type === 'text') {
+                ctx.font = "bold 20px sans-serif";
+                ctx.fillStyle = 'black';
+                ctx.lineWidth = 4;
+                ctx.strokeText(p.text, p.x, p.y);
+                ctx.fillStyle = p.color;
+                ctx.fillText(p.text, p.x, p.y);
+            } else if (p.type === 'shockwave') {
+                ctx.strokeStyle = '#3b82f6';
+                ctx.lineWidth = 15 * p.life;
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, p.size * (2-p.life), 0, Math.PI*2);
+                ctx.stroke();
+            } else if (p.type === 'dot') {
+                ctx.font = `${p.size}px Arial`;
+                ctx.fillText(p.char, p.x, p.y);
+            }
+            ctx.restore();
+        });
+    }
+    ctx.restore();
+}
+
+function gameLoop(timestamp) {
+    if (gameState !== 'PLAYING') {
+        if (gameState === 'PAUSED' || gameState === 'GAMEOVER') {
+            requestAnimationFrame(gameLoop);
+            return;
+        }
+    }
+
+    if (!lastFrameTime) lastFrameTime = timestamp;
+    const elapsed = timestamp - lastFrameTime;
+
+    if (elapsed > FRAME_INTERVAL) {
+        lastFrameTime = timestamp - (elapsed % FRAME_INTERVAL);
+        update();
+        draw();
+    }
+    requestAnimationFrame(gameLoop);
+}
+
+// --- VFX Helpers ---
+function createSingleSparkle(x, y, char) {
+    particles.push({
+        x: x, y: y - 20, vx: 0, vy: -2, life: 1.0, size: 30, char: char, type: 'dot'
+    });
+}
+
+function createSludge(x, y) {
+    for(let i=0; i<3; i++) {
+        particles.push({
+            x: x, y: y, vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.5) * 2,
+            life: 1.5, size: 20, char: '💩', type: 'dot'
+        });
+    }
+}
+
+function createShockwave(x, y) {
+    particles.push({ x: x, y: y, life: 1.0, size: 300, type: 'shockwave', vx:0, vy:0 });
+}
+
+function showFloatText(x, y, text, color) {
+    const vx = (Math.random() - 0.5) * 2;
+    particles.push({ x: x, y: y, vx: vx, vy: -3, life: 1.5, text: text, color: color, type: 'text' });
+}
+
+function triggerShake(duration) {
+    shakeTimer = duration;
+}
+
+// Start
+init();
+
+</script>
+</body>
+</html>
